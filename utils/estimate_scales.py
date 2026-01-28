@@ -136,7 +136,7 @@ def estimate(img_base, img_zoom, interval, metric, debug=False):
         plt.show()
 
     print(f"Otimização concluída em {final - init:.4f}s")
-    print(f"Melhor Escala Encontrada: {s:.5f} (Erro: {err:.2f})")
+    print(f"Melhor Escala Encontrada: {s:.4f} (Erro: {err:.2f})")
 
     return s, err
 
@@ -169,8 +169,8 @@ def algorithm(images, metric, interval, debug=False):
         img_base = cv2.cvtColor(images[i], cv2.COLOR_BGR2GRAY)
         img_next = cv2.cvtColor(images[i+1], cv2.COLOR_BGR2GRAY)
 
-        print("-----------------------------------")
-        print(f"\n[Processando par {i} -> {i+1}]...", end=" ")
+        print("-------------------------------------------------------")
+        print(f"[Processando par {i} -> {i+1}]...", end=" ")
         
         scale, error = estimate(
             img_base, 
@@ -181,7 +181,6 @@ def algorithm(images, metric, interval, debug=False):
         )
         scales_step.append(scale)
         errors_min.append(error)
-        print(f"\nEscala detectada: {scale:.4f} (Erro: {error:.2f})")
         
     # Calcular Escala Acumulada (Trajetória Z).
     accumulated_scale = [1.0] # A primeira imagem é a base 1.0
