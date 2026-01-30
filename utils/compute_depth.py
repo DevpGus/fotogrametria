@@ -237,7 +237,7 @@ def plot_depth(depth_map, index_map):
     plt.subplot(1, 2, 1)
     plt.imshow(index_map, cmap='nipy_spectral')
     plt.colorbar(label='Índice da Imagem (0 a N)')
-    plt.title("Mapa de Índices (Onde está o foco?)")
+    plt.title("Mapa de Índices")
     
     plt.subplot(1, 2, 2)
     # Mascarar zeros para visualização melhor (fundo preto)

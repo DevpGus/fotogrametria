@@ -9,7 +9,7 @@ import os
 os.system('cls')
 
 # Constantes.
-MOTOR_STEP_MM = 2
+MOTOR_STEP_MM = 1
 INPUT_ALIGNED_PATH = './images/aligned'
 INPUT_RAW_PATH = './images/ordered'
 INTERVAL = np.linspace(1.00, 1.20, 500)
