@@ -1,5 +1,5 @@
-from utils.compute_depth import analyze_keypoint_density, compute_focus_stacking, save_focus_results, calculate_depth_map, plot_depth
-from utils.align_images import load_images_from_folder, align_images_ecc, is_empty, save_results
+from utils.compute_depth import keypoint_analysis, depth_map, plot_depth, save_point_cloud
+from utils.align_images import load_images, align_images, is_empty, save_results, focus_analysis
 from utils.estimate_scales import algorithm
 import pandas as pd
 import numpy as np
@@ -8,71 +8,77 @@ import os
 
 os.system('cls')
 
+print("---- INICIALIZANDO ALGORITMO DE RECONSTRUÇÃO 3D ----")
+
 # Constantes.
-MOTOR_STEP_MM = 1
+MOTOR_STEP_MM = 0.001
 INPUT_ALIGNED_PATH = './images/aligned'
 INPUT_RAW_PATH = './images/ordered'
 INTERVAL = np.linspace(1.00, 1.20, 500)
 
-# Download e Ordenação das Imagens.
+# Fase 1: Ordenação, Alinhamento e Recorte de Imagens (ECC).
 if is_empty(INPUT_ALIGNED_PATH):
-    raw_images = load_images_from_folder(INPUT_RAW_PATH)
-    aligned_imgs, scales, accumulated_scales = align_images_ecc(raw_images)
+    raw_images = load_images(INPUT_RAW_PATH)
+
+    aligned_imgs, scales, accumulated_scales = align_images(raw_images)
     save_results(aligned_imgs, scales, accumulated_scales)
+images = load_images(INPUT_ALIGNED_PATH)
 
-# Imagens Alinhadas.
-images = load_images_from_folder(INPUT_ALIGNED_PATH)
 
-# Descrição de PATHs.
-CUSTO = input('\nDigite qual método será utilizado para calcular as escalas (MSE, RMSE, NCC ou ECC): ')
+# Fase 2: Estimativa das Escalas por Função de Custo.
+CUSTO = input('\nDefina a Função de Custo para a estimativa de escalas (RMSE, MSE, NCC, ECC ou None): ')
 
 if CUSTO == 'MSE':
-        df_path = f"./results/scales/mse/escalas.csv"
-        resume_path = f"./results/scales/mse/resume.csv"
+    dir_path = "./results/scales/mse"
+    df_path = f"./results/scales/mse/escalas.csv"
+    resume_path = f"./results/scales/mse/resume.csv"
 elif CUSTO == 'RMSE':
+    dir_path = "./results/scales/rmse"
     df_path = f"./results/scales/rmse/escalas.csv"
     resume_path = f"./results/scales/rmse/resume.csv"
 elif CUSTO == 'ECC':
+    dir_path = "./results/scales/ecc"
     df_path = f"./results/scales/ecc/escalas.csv"
     resume_path = f"./results/scales/ecc/resume.csv"
-else:
+elif CUSTO == 'NCC':
+    dir_path = "./results/scales/ncc"
     df_path = f"./results/scales/ncc/escalas.csv"
     resume_path = f"./results/scales/ncc/resume.csv"
+else:
+    quit()
 
-# Operar Estimativas.
-step1 = input("\nRealizar estimativa das escalas? Sim (1)\n")
-if step1 == '1' and CUSTO != 'ECC':
+if CUSTO in ['MSE', 'RMSE', 'NCC']:
     os.system('cls')
 
     # Estimativa das Escalas.
-    step_scales, accumulated_scales = algorithm(images, CUSTO, INTERVAL, debug=False)
+    if is_empty(dir_path):
+        step_scales, accumulated_scales = algorithm(images, CUSTO, INTERVAL, debug=True)
 
-    # DataFrames.
-    imgs_idx = np.arange(0, len(step_scales), 1)
+        # DataFrames.
+        imgs_idx = np.arange(0, len(step_scales), 1)
+        df = pd.DataFrame(columns=['imagens', 'escalas', 'escalas_acumuladas'])
+        df['imagens'] = imgs_idx
+        df['escalas'] = step_scales
+        df['escalas_acumuladas'] = accumulated_scales
+        resume = df.describe()
 
-    df = pd.DataFrame(columns=['imagens', 'escalas', 'escalas_acumuladas'])
-    df['imagens'] = imgs_idx
-    df['escalas'] = step_scales
-    df['escalas_acumuladas'] = accumulated_scales
+        # Salva em disco
+        df.to_csv(df_path, index=False)
+        resume.to_csv(resume_path, index=True)
 
-    resume = df.describe()
-
-    # Salva em disco
-    df.to_csv(df_path, index=False)
-    resume.to_csv(resume_path, index=True)
-
-else:
-    if not is_empty(df_path):
-        df = pd.read_csv(df_path)
     else:
-        print("ERRO: Certifique-se de calcular as escalas.")
+        df = pd.read_csv(df_path)
 
-# Análise de Keypoints e Escalas.
-kp_stats = analyze_keypoint_density(aligned_images=images, scales=df['escalas'])
+# Fase 3: Análise de Keypoints e Escalas.
+kp_stats, color_idx = keypoint_analysis(aligned_images=images, scales=df['escalas'])
+kp_stats.to_csv('./results/keypoints/kp_stats.csv', index=False)
+# Fase 4: Calcular Profundidade.
+step2 = input("\n[OS] Prosseguir para cálculo da profundidade? [Enter] ")
 
-# Calcular Profundidade.
-step2 = input("\nRealizar estimativa da profundidade? Sim (1)\n")
+if step2 == '':
+    depth_final, depth_raw, index_map = depth_map(images, df['escalas_acumuladas'], MOTOR_STEP_MM, agg_window=3, d=5, h_thr=0.21, px_thr=20)
+plot_depth(depth_final, index_map)
 
-if step2 == '1':
-    depth_map, index_map = calculate_depth_map(images, df['escalas_acumuladas'], MOTOR_STEP_MM)
-    plot_depth(depth_map, index_map)
+# Fase 5: Reconstrução 3D.
+img = images[color_idx]
+save_point_cloud(depth_final, img, filename="./results/models/model.ply")

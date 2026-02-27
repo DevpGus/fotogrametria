@@ -1,12 +1,11 @@
-import cv2
-import csv
-import os
-import re
-import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
+import cv2
+import os
 
-def analyze_keypoint_density(aligned_images, scales, show=False):
+# Análise de Pontos de Interesse.
+def keypoint_analysis(aligned_images, scales, show=False):
     """
     Detecta Keypoints (AKAZE) em todas as camadas e analisa sua distribuição.
     Isso identifica quais imagens contêm a estrutura real da moeda.
@@ -15,7 +14,7 @@ def analyze_keypoint_density(aligned_images, scales, show=False):
     
     os.system('cls')
 
-    print(f"\nIniciando Análise de Densidade de Keypoints (AKAZE)")
+    print(f"\nFase 3: Análise de Densidade de Keypoints (AKAZE)")
     
     # Inicializa o detector AKAZE
     # threshold: Controla a sensibilidade. 
@@ -39,13 +38,13 @@ def analyze_keypoint_density(aligned_images, scales, show=False):
         avg_responses.append(avg_resp)
         
         if i % 10 == 0:
-            print(f"Img {i}: {count} pontos detectados.")
+            print(f">> Img {i}: {count} pontos detectados.")
 
     index = np.arange(len(aligned_images))
     counts = np.array(keypoint_counts)
     
     best_idx = np.argmax(counts)
-    print(f"\nImagem com maior informação: Índice {best_idx} ({counts[best_idx]} pontos)")
+    print(f"\n>> Imagem com maior informação: Índice {best_idx} ({counts[best_idx]} pontos)")
     
     plt.figure(figsize=(15, 6))
     
@@ -61,10 +60,10 @@ def analyze_keypoint_density(aligned_images, scales, show=False):
     
     # Gráfico 2: Relação com a Escala.
     plt.subplot(1, 2, 2)
-    plt.plot(scales, counts, color='g', marker='x', linestyle='None')
-    plt.title("Correlação: Escala vs. Quantidade de Detalhe")
+    plt.hist(x=scales, bins=5, color='g')
+    plt.title("Histograma da Escala")
     plt.xlabel("Fator de Escala (Zoom)")
-    plt.ylabel("Número de Keypoints")
+    plt.ylabel("Frequência")
     plt.grid(True, alpha=0.3)
     
     plt.tight_layout()
@@ -91,9 +90,10 @@ def analyze_keypoint_density(aligned_images, scales, show=False):
         'scale_val': scales if scales.all() else np.zeros_like(index)
     })
     
-    return df_kps
+    return df_kps, best_idx
 
-def compute_focus_stacking(aligned_images, scales):
+# Cálculo das Camadas de Foco.
+def compute_focus(aligned_images, scales):
     """
     Realiza o Depth from Focus (DfF) para gerar a imagem nítida e mapas de dados.
     
@@ -114,7 +114,7 @@ def compute_focus_stacking(aligned_images, scales):
 
     os.system('cls')
 
-    print(f"\nIniciando Depth from Focus em {len(aligned_images)} camadas")
+    print(f"\n Fase 4: Iniciando Depth from Focus em {len(aligned_images)} camadas")
     height, width = aligned_images[0].shape[:2]
     n_images = len(aligned_images)
     
@@ -156,20 +156,14 @@ def compute_focus_stacking(aligned_images, scales):
         'confidence': confidence_map
     }
 
-def calculate_depth_map(aligned_images, accmd_scales, motor_step):
+# Cálculo do Mapa de Profundidade.
+def depth_map(aligned_images, accmd_scales, motor_step, 
+                                agg_window, d, h_thr, px_thr):
     """
-    Reconstrói o mapa de profundidade (Z) a partir de uma pilha de imagens,
-    usando Depth from Focus combinado com a geometria de escala (Zoom).
-    
-    Args:
-        aligned_images: Lista de arrays numpy (imagens em tons de cinza).
-        accmd_scales: Lista de floats com a escala de cada imagem (S).
-        motor_step: Deslocamento físico entre cada foto (Delta Z).
-        
-    Returns:
-        depth_map: Matriz 2D com a distância Z calculada para cada pixel.
-        index_map: Matriz 2D mostrando qual imagem tinha o melhor foco (para debug).
+    Reconstrução 3D refinada com Agregação de Custo e Preservação de Bordas.
+    Ideal para lidar com reflexos especulares (moedas, cristais, etc).
     """
+    print("\nFase 4: Estimando a Profundidade dos Pixels.")
     
     images = []
     for img in aligned_images:
@@ -179,58 +173,54 @@ def calculate_depth_map(aligned_images, accmd_scales, motor_step):
         else:
             images.append(img)
 
-    print("\nIniciando reconstrução 3D (Depth from Focus)")
-
-    # 1. Empilhar imagens em um array 3D para processamento em lote (Altura, Largura, Numero_Imagens).
     stack = np.dstack(images)
     h, w, n_imgs = stack.shape
     
-    print(f"Volume de Dados: {w}x{h} pixels com {n_imgs} camadas.")
-    
-    # 2. Calcular a Medida de Foco (Laplaciano) para todo o cubo
     focus_cube = np.zeros_like(stack, dtype=np.float32)
     
-    print("\nCalculando nitidez (Laplaciano) por camada...")
+    print(f">> Calculando Foco com Filtro Passa-Baixa (Janela {agg_window}x{agg_window})...")
     for i in range(n_imgs):
         img = stack[:, :, i]
         
-        # Suavização leve.
-        blur = cv2.GaussianBlur(img, (5, 5), 0)
-        # Laplaciano: Detecta bordas rápidas (foco).
-        lap = cv2.Laplacian(blur, cv2.CV_64F) 
-        # Variância ou Magnitude absoluta do Laplaciano.
-        focus_cube[:, :, i] = np.abs(lap)
+        # Suavização inicial.
+        blur = cv2.GaussianBlur(img, (3, 3), 0)
         
-    # 3. Encontrar o índice da imagem com maior nitidez para cada pixel.
+        # Derivada de 2ª ordem (Laplaciano) e Magnitude Absoluta.
+        lap = cv2.Laplacian(blur, cv2.CV_64F)
+        lap_mag = np.abs(lap)
+        
+        # Agregação de Custo
+        # Passa-baixa no domínio do foco.
+        focus_cube[:, :, i] = lap_mag
+        
+    # 2. Argmax
     index_map = np.argmax(focus_cube, axis=2)
     
-    # 4. Converter Índices para Profundidade Real (Z)
-    depth_map = np.zeros((h, w), dtype=np.float32)
+    # 3. Conversão Geométrica (Índice -> Profundidade Z)
+    depth_map_raw = np.zeros((h, w), dtype=np.float32)
     
     vector_scales = np.array(accmd_scales)
     vector_shift = np.arange(n_imgs) * motor_step
     
     for k in range(1, n_imgs):
         mask = (index_map == k)
+        if np.sum(mask) == 0: continue
         
-        if np.sum(mask) == 0:
-            continue
-            
         s_k = vector_scales[k]
         dist_k = vector_shift[k]
         
-        # Fórmula: Z = (s * DeltaZ) / (s - 1)
         if s_k > 1.0001: 
-            z_value = (s_k * dist_k) / (s_k - 1.0)
-            depth_map[mask] = z_value
-        else:
-            # Se a escala for 1 (sem zoom), a profundidade é indeterminada 
-            # pela fórmula geométrica. Mantemos 0 ou definimos um valor padrão.
-            pass
+            depth_map_raw[mask] = (s_k * dist_k) / (s_k - 1.0)
+            
+    depth_map_final = depth_map_raw.copy()
+    
+    print(">> Aplicando Filtro Bilateral no Mapa de Profundidade...")
+    depth_map_final = cv2.bilateralFilter(depth_map_raw, d=d, sigmaColor=h_thr, sigmaSpace=px_thr)
+        
+    print("Reconstrução concluída com sucesso!")
+    return depth_map_final, depth_map_raw, index_map
 
-    print("Mapa de Profundidade calculado com sucesso.")
-    return depth_map, index_map
-
+# Visualização de Profundidade (Z)
 def plot_depth(depth_map, index_map):
     plt.figure(figsize=(12, 6))
     
@@ -249,7 +239,8 @@ def plot_depth(depth_map, index_map):
     plt.tight_layout()
     plt.show()
 
-def save_focus_results(results, output_dir="../results/depth_map"):
+# Salvar Resultados [compute_focus()]
+def save_focus(results, output_dir="../results/depth_map"):
     """
     Exibe o painel de diagnóstico e salva os dados.
     
@@ -285,3 +276,79 @@ def save_focus_results(results, output_dir="../results/depth_map"):
     
     plt.tight_layout()
     plt.show()
+
+# Salvar Resultados [depth_map()]
+def save_point_cloud(depth_map, color_image, filename="./results/models/model.ply", focal_length=None, invert_z=True):
+    """
+    Converte um Depth Map em uma Nuvem de Pontos colorida e exporta para formato .ply.
+    
+    Args:
+        depth_map: Matriz 2D com as estimativas de Z.
+        color_image: Imagem RGB da moeda/fóssil (idealmente a imagem de melhor foco geral).
+        filename: Nome do arquivo de saída.
+        focal_length: Distância focal em pixels. Se None, estima a partir da largura.
+        invert_z: Se True, inverte o eixo Z para que o relevo fique convexo (saltando).
+    """
+    os.system('cls')
+
+    print("\nFase 5: Reconstrução de Nuvem de Pontos 3D.")
+    
+    h, w = depth_map.shape
+    
+    if color_image.shape[:2] != (h, w):
+        color_image = cv2.resize(color_image, (w, h))
+    if color_image.shape[2] == 3 and color_image.dtype == np.uint8:
+        color_image = cv2.cvtColor(color_image, cv2.COLOR_BGR2RGB)
+        
+    # 1. Estimar Parâmetros Intrínsecos da Câmera (w)
+    if focal_length is None:
+        focal_length = w
+    
+    cx, cy = w / 2.0, h / 2.0
+    
+    # 2. Criar malha de coordenadas (u, v) vetorizada
+    u, v = np.meshgrid(np.arange(w), np.arange(h))
+    
+    # 3. Filtrar apenas os pixels válidos (onde Z > 0)
+    valid_points = depth_map > 0
+    
+    u_valid = u[valid_points]
+    v_valid = v[valid_points]
+    z_valid = depth_map[valid_points]
+    colors_valid = color_image[valid_points]
+    
+    # 4. Inversão do Relevo
+    if invert_z:
+        z_max = np.max(z_valid)
+        z_valid = z_max - z_valid
+    
+    # 5. Aplicar a fórmula Pinhole para achar X e Y reais
+    x_valid = (u_valid - cx) * z_valid / focal_length
+    y_valid = (v_valid - cy) * z_valid / focal_length
+    
+    # Inverter eixo Y (Convenção).
+    y_valid = -y_valid
+    
+    # 6. Formatar os dados (N, 3).
+    points_3d = np.vstack((x_valid, y_valid, z_valid)).T
+    
+    print(f">> Escrevendo {points_3d.shape[0]} vértices no arquivo {filename}...")
+    
+    with open(filename, 'w') as f:
+        f.write("ply\n")
+        f.write("format ascii 1.0\n")
+        f.write(f"element vertex {points_3d.shape[0]}\n")
+        f.write("property float x\n")
+        f.write("property float y\n")
+        f.write("property float z\n")
+        f.write("property uchar red\n")
+        f.write("property uchar green\n")
+        f.write("property uchar blue\n")
+        f.write("end_header\n")
+        
+        for i in range(points_3d.shape[0]):
+            pt = points_3d[i]
+            col = colors_valid[i]
+            f.write(f"{pt[0]:.4f} {pt[1]:.4f} {pt[2]:.4f} {col[0]} {col[1]} {col[2]}\n")
+            
+    print(f"[OS] Sucesso! Abra o arquivo '{filename}'.")

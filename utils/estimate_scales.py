@@ -1,12 +1,9 @@
-from typing import List
 import matplotlib.pyplot as plt
-import pandas as pd
 import numpy as np
 import time
 import cv2
 
-
-#### Cost Functions
+# Funções de Custo.
 def mse(img1, img2):
     """
     Mean Squared Error.
@@ -48,7 +45,7 @@ def ncc(img1, img2):
         
     return dot_product / (norm1 * norm2)
 
-### Gerenciamento dos Gráficos
+# Gerenciamento dos Gráficos.
 def on_press(event):
     global debug
     if event.key == 'enter':
@@ -57,7 +54,7 @@ def on_press(event):
         debug = False
         plt.close()
 
-#### Estimate Functions
+# Estima as Escalas do Conjunto de Imagens.
 def estimate(img_base, img_zoom, interval, metric, debug=False):
     """
     Testa vários fatores de escala para encontrar qual faz a img_zoom voltar a ser idêntica à img_base.
@@ -117,11 +114,10 @@ def estimate(img_base, img_zoom, interval, metric, debug=False):
     err = errors[idx]
     
     if debug:
-        # Plotagem com Matplotlib.
+
         fig = plt.figure(figsize=(12, 5))
         plt.suptitle(f"Função de Custo: {metric} | Pressione '0' ou 'ESC' para continuar")
 
-        # Gráfico 1: A Função de Custo.
         plt.plot(scales, errors, color='blue', linewidth=2)
         plt.axvline(x=s, color='red', linestyle='--', label=f'Detectado: {s:.4f}')
         
@@ -135,11 +131,12 @@ def estimate(img_base, img_zoom, interval, metric, debug=False):
 
         plt.show()
 
-    print(f"Otimização concluída em {final - init:.4f}s")
-    print(f"Melhor Escala Encontrada: {s:.4f} (Erro: {err:.2f})")
+    print(f"[{final - init:.4f}s]")
+    print(f">> Melhor Escala Encontrada: {s:.4f} (Erro: {err:.2f})")
 
     return s, err
 
+# Código Principal do Cálculo das Escalas.
 def algorithm(images, metric, interval, debug=False):
     """
     Processa uma sequência de imagens alinhadas para determinar a escala relativa passo a passo.
@@ -155,11 +152,10 @@ def algorithm(images, metric, interval, debug=False):
         accumulated_scales: Lista da escala absoluta em relação à primeira imagem
 
     """
-
-    print("\n[Algoritmo]")
-    print(f"Função de Custo selecionada: {metric}")
-    print(f"Total de imagens na pilha: {len(images)}")
-    print(f"Iniciando iteração no intervalo I = [{interval[0]:.4f}, {interval[-1]:.4f}]")
+    print("\nFase 2: Estimando as Escalas")
+    print(f">> Função de Custo selecionada: {metric}")
+    print(f">> Total de imagens na pilha: {len(images)}")
+    print(f">> Iniciando iteração no intervalo I = [{interval[0]:.4f}, {interval[-1]:.4f}]\n")
     
     scales_step = []
     errors_min = []
@@ -169,27 +165,25 @@ def algorithm(images, metric, interval, debug=False):
         img_base = cv2.cvtColor(images[i], cv2.COLOR_BGR2GRAY)
         img_next = cv2.cvtColor(images[i+1], cv2.COLOR_BGR2GRAY)
 
-        print("-------------------------------------------------------")
-        print(f"[Processando par {i} -> {i+1}]...", end=" ")
+        print(f"[Processando par {i} -> {i+1}]", end=" ")
         
         scale, error = estimate(
             img_base, 
             img_next, 
             interval,
             metric=metric,
-            debug=debug
+            debug=False # Ativo apenas para manutenção.
         )
         scales_step.append(scale)
         errors_min.append(error)
         
     # Calcular Escala Acumulada (Trajetória Z).
-    accumulated_scale = [1.0] # A primeira imagem é a base 1.0
+    accumulated_scale = [1.0] # Img Base.
 
     for s in scales_step:
         nova_escala_total = accumulated_scale[-1] * s
         accumulated_scale.append(nova_escala_total)
 
-    # Gráficos.
     if debug:
 
         fig = plt.figure(figsize=(12, 5))
