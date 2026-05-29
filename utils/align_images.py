@@ -77,7 +77,7 @@ def align_images(images):
     common_mask = np.ones((height, width), dtype=np.uint8) * 255
     
     # Configuração ECC (Critérios de parada).
-    warp_mode = cv2.MOTION_AFFINE
+    warp_mode = cv2.MOTION_AFFINE # HOMOGRAPHY considera movimentos 3D
     criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 50, 1e-5)
     warp_matrix = np.eye(2, 3, dtype=np.float32)
 
@@ -127,7 +127,6 @@ def align_images(images):
             scales.append(scales[-1])
             acummulated_scales.append(acummulated_scales[-1]**2)
             
-
     # Corte
     contours, _ = cv2.findContours(common_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
@@ -210,8 +209,14 @@ def focus_analysis(aligned_images, scales, accmd_scales, k=0.5, debug=False):
     print(f">> Imagens Úteis identificadas: {len(idx_approved)}")
     print(f">> Seleção: Mantendo índices {idx_start} até {idx_end} (Total: {len(final_imgs)} imagens)\n")
     
+
     final_scales = scales[idx_start : idx_end+1]
-    final_accmd_scales = accmd_scales[idx_start : idx_end+1]
+
+    final_accmd_scales = [final_scales[0]]
+    for s in final_scales[1:]:
+        final_accmd_scales.append(final_accmd_scales[-1]*s)
+    
+    # final_accmd_scales = accmd_scales[idx_start : idx_end+1]
 
     return final_imgs, final_scales, final_accmd_scales
 
